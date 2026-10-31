@@ -4,14 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<script>try{var T=localStorage.getItem("theme")}catch(e){}document.documentElement.dataset.theme=T||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light")</script>
 <title>Meteo – prognoza dla miejscowości</title>
 <style>
   :root{--bg:#f2f6fb;--card:#fff;--fg:#17212f;--mut:#667085;--grid:#e8edf4;--axis:#8793a6;--line:#cdd6e3;--acc:#1c6ad1;--sh:0 1px 2px #1017280f,0 6px 20px #1017280d}
-  @media (prefers-color-scheme:dark){:root{--bg:#0d131b;--card:#151d29;--fg:#e8edf4;--mut:#93a0b4;--grid:#232f40;--axis:#7d8a9e;--line:#344256;--acc:#5aa0f0;--sh:0 0 0 1px #ffffff0d}}
+  :root[data-theme=dark]{--bg:#0d131b;--card:#151d29;--fg:#e8edf4;--mut:#93a0b4;--grid:#232f40;--axis:#7d8a9e;--line:#344256;--acc:#5aa0f0;--sh:0 0 0 1px #ffffff0d}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   header{background:linear-gradient(135deg,#0d3a75,#1c6ad1);padding:1rem .8rem 1.1rem;position:sticky;top:0;z-index:10;box-shadow:0 2px 12px #0004}
   .in{max-width:1000px;margin:0 auto;position:relative}
+  #th{position:absolute;right:0;top:-.1rem;width:2.2rem;height:2.2rem;border:0;border-radius:50%;background:#ffffff26;color:#fff;font-size:1.15rem;cursor:pointer;line-height:1}
+  #th:hover{background:#ffffff45}
   h1{margin:0 0 .6rem;font-size:1.15rem;font-weight:650;color:#fff;letter-spacing:.2px}
   input{width:100%;padding:.75rem 1rem;font:inherit;font-size:1.05rem;border:0;border-radius:12px;background:#fff;color:#17212f;outline:0;box-shadow:0 2px 8px #0003}
   input:focus{box-shadow:0 0 0 3px #ffffff80,0 2px 8px #0003}
@@ -48,6 +51,7 @@
 <body>
 <header><div class="in">
   <h1>Meteo · prognoza godzinowa</h1>
+  <button id="th" title="Zmień motyw (jasny/ciemny)" aria-label="Zmień motyw"></button>
   <input id="q" placeholder="Wpisz nazwę miejscowości…" autocomplete="off" autofocus>
   <div id="list" hidden></div>
 </div></header>
@@ -57,6 +61,9 @@
 </main>
 <script>
 const $=id=>document.getElementById(id),q=$('q'),list=$('list'),bar=$('bar'),chartsEl=$('charts');
+const th=$('th'),root=document.documentElement;
+const setIcon=()=>{th.textContent=root.dataset.theme==='dark'?'☀':'☾'};setIcon();
+th.onclick=()=>{const n=root.dataset.theme==='dark'?'light':'dark';root.dataset.theme=n;try{localStorage.setItem('theme',n)}catch(e){}setIcon()};
 let cities=[],hits=[],sel=-1;
 const norm=s=>s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ł/g,'l');
 fetch('cities.min.json').then(r=>r.json()).then(d=>{cities=d.map(c=>({n:c[0],lat:c[1],lon:c[2],k:norm(c[0])}));fromHash()});
@@ -125,8 +132,12 @@ function drawAll(d){
     {type:'line',data:arr(d,'wind_gust_max'),color:'#e08a00',label:'porywy',u:'m/s',dash:'5 3'},
     {type:'line',data:arr(d,'wind10_sd_true_prev_point'),color:'#2f7de1',label:'wiatr 10 m',u:'m/s',marks:1}]});
   chart({...o,title:'Zachmurzenie i mgła',unit:'%',lo:0,hi:100,layers:[
-    {type:'area',data:arr(d,'cldtot_aver',100),color:'#7a869a',label:'zachmurzenie',u:'%'},
+    {type:'area',data:arr(d,'cldtot_aver',100),color:'#7a869a',label:'zachmurzenie całk.',u:'%'},
     {type:'line',data:arr(d,'fog_max',100),color:'#a05bc4',label:'mgła',u:'%'}]});
+  chart({...o,title:'Chmury wg wysokości',unit:'%',lo:0,hi:100,layers:[
+    {type:'area',data:arr(d,'cldhigh_aver',100),color:'#b58be0',label:'wysokie (Ci, Cs)',u:'%'},
+    {type:'area',data:arr(d,'cldmed_aver',100),color:'#2f9bd6',label:'średnie (Ac, As)',u:'%'},
+    {type:'area',data:arr(d,'cldlow_aver',100),color:'#5b6b86',label:'niskie (St, Sc, Cu)',u:'%'}]});
   chartsEl.insertAdjacentHTML('beforeend',`<div class="foot">Model UM 4 km, bieg ${base.fstart} · czas: Europe/Warsaw</div>`);
 }
 const nice=r=>{const m=Math.pow(10,Math.floor(Math.log10(r))),f=r/m;return(f<=1?1:f<=2?2:f<=5?5:10)*m};
@@ -160,7 +171,7 @@ function chart(s){
   for(const l of layers){
     const ax=l.axis==='R'?AR:A,pt=a=>a.map((v,i)=>`${X(i).toFixed(1)},${Y(v,ax).toFixed(1)}`),y0=Y(ax.lo,ax);
     if(l.type==='band')g+=`<polygon points="${pt(l.hi).concat(pt(l.lo).reverse()).join(' ')}" fill="${l.color}" fill-opacity=".16"/>`;
-    else if(l.type==='area')g+=`<polygon points="${[`${X(0)},${y0}`].concat(pt(l.data),[`${X(n-1)},${y0}`]).join(' ')}" fill="${l.color}" fill-opacity=".28" stroke="${l.color}" stroke-width="1.5" stroke-linejoin="round"/>`;
+    else if(l.type==='area')g+=`<polygon points="${[`${X(0)},${y0}`].concat(pt(l.data),[`${X(n-1)},${y0}`]).join(' ')}" fill="${l.color}" fill-opacity="${l.fo||.22}" stroke="${l.color}" stroke-width="1.5" stroke-linejoin="round"/>`;
     else if(l.type==='bars')l.data.forEach((v,i)=>{if(v>=.03)g+=`<rect x="${(X(i)-bw/2).toFixed(1)}" y="${Y(v,ax).toFixed(1)}" width="${bw.toFixed(1)}" height="${(y0-Y(v,ax)).toFixed(1)}" rx="1.5" fill="${l.color}"/>`});
     else{g+=`<polyline points="${pt(l.data).join(' ')}" fill="none" stroke="${l.color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"${l.dash?` stroke-dasharray="${l.dash}"`:''}/>`;
       if(l.marks)for(const[i,dy]of[[l.data.indexOf(Math.max(...l.data)),-7],[l.data.indexOf(Math.min(...l.data)),15]])
