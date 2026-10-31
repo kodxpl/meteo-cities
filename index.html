@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meteogram po nazwie miejscowości</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;display:flex;flex-direction:column;height:100vh}
+  header{padding:.6rem;background:#145097;color:#fff;position:relative}
+  input{width:100%;box-sizing:border-box;padding:.6rem;font-size:1rem;border:0;border-radius:4px}
+  #list{position:absolute;left:.6rem;right:.6rem;top:100%;background:#fff;color:#000;z-index:5;max-height:50vh;overflow:auto;box-shadow:0 4px 12px #0006}
+  #list div{padding:.5rem .6rem;cursor:pointer;border-bottom:1px solid #eee}
+  #list div:hover,#list div.on{background:#dde8f7}
+  small{color:#666}
+  iframe{flex:1;border:0;width:100%}
+  #bar{padding:.3rem .6rem;font-size:.85rem}
+</style>
+</head>
+<body>
+<header>
+  <input id="q" placeholder="Wpisz nazwę miejscowości…" autocomplete="off" autofocus>
+  <div id="list" hidden></div>
+</header>
+<div id="bar"></div>
+<iframe id="f" title="Meteogram"></iframe>
+<script>
+const q=document.getElementById('q'),list=document.getElementById('list'),f=document.getElementById('f'),bar=document.getElementById('bar');
+let cities=[],hits=[],sel=-1;
+const norm=s=>s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ł/g,'l');
+fetch('cities.min.json').then(r=>r.json()).then(d=>{cities=d.map(c=>({n:c[0],lat:c[1],lon:c[2],k:norm(c[0])}));fromHash()});
+function url(c){return `https://app.meteo.pl/meteogram/${c.lat},${c.lon}`}
+function show(c){
+  q.value=c.n;list.hidden=true;f.src=url(c);
+  bar.innerHTML=`${c.n} (${c.lat}, ${c.lon}) – <a href="${url(c)}" target="_blank" rel="noopener">otwórz w nowej karcie</a>`;
+  location.hash=`${c.lat},${c.lon}`;
+}
+function render(){
+  list.innerHTML='';
+  hits.forEach((c,i)=>{const d=document.createElement('div');if(i===sel)d.className='on';
+    d.innerHTML=`${c.n} <small>${c.lat}, ${c.lon}</small>`;d.onclick=()=>show(c);list.appendChild(d)});
+  list.hidden=!hits.length;
+}
+q.oninput=()=>{
+  const t=norm(q.value.trim());sel=-1;
+  if(!t){hits=[];return render()}
+  const starts=[],cont=[];
+  for(const c of cities){if(c.k.startsWith(t))starts.push(c);else if(c.k.includes(t))cont.push(c);if(starts.length>=30)break}
+  hits=starts.concat(cont).slice(0,30);render();
+};
+q.onkeydown=e=>{
+  if(e.key==='ArrowDown'){sel=Math.min(sel+1,hits.length-1);render();e.preventDefault()}
+  else if(e.key==='ArrowUp'){sel=Math.max(sel-1,0);render();e.preventDefault()}
+  else if(e.key==='Enter'&&hits.length)show(hits[Math.max(sel,0)]);
+};
+function fromHash(){
+  const m=location.hash.match(/^#(-?[\d.]+),(-?[\d.]+)$/);if(!m)return;
+  const c=cities.find(x=>x.lat==m[1]&&x.lon==m[2]);if(c)show(c);
+}
+</script>
+</body>
+</html>
