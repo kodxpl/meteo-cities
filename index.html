@@ -5,15 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Meteogram po nazwie miejscowości</title>
 <style>
-  body{font-family:system-ui,sans-serif;margin:0;display:flex;flex-direction:column;height:100vh}
-  header{padding:.6rem;background:#145097;color:#fff;position:relative}
+  body{font-family:system-ui,sans-serif;margin:0}
+  header{padding:.6rem;background:#145097;color:#fff;position:sticky;top:0;z-index:10}
   input{width:100%;box-sizing:border-box;padding:.6rem;font-size:1rem;border:0;border-radius:4px}
   #list{position:absolute;left:.6rem;right:.6rem;top:100%;background:#fff;color:#000;z-index:5;max-height:50vh;overflow:auto;box-shadow:0 4px 12px #0006}
   #list div{padding:.5rem .6rem;cursor:pointer;border-bottom:1px solid #eee}
   #list div:hover,#list div.on{background:#dde8f7}
   small{color:#666}
-  iframe{flex:1;border:0;width:100%}
   #bar{padding:.3rem .6rem;font-size:.85rem}
+  #charts{padding:0 .6rem}
+  .chart{margin:.4rem 0 .8rem;font-size:.85rem}
+  .ct{font-weight:600;margin-bottom:.1rem}
+  .ct span{font-weight:400;margin-left:.8rem;color:#444;white-space:nowrap}
+  .ct i{display:inline-block;width:.9em;height:.55em;margin-right:.3em;border-radius:2px}
+  .chart svg{width:100%;height:200px;display:block}
+  .msg{padding:.5rem 0;color:#666}
 </style>
 </head>
 <body>
@@ -22,17 +28,18 @@
   <div id="list" hidden></div>
 </header>
 <div id="bar"></div>
-<iframe id="f" title="Meteogram"></iframe>
+<div id="charts"></div>
 <script>
-const q=document.getElementById('q'),list=document.getElementById('list'),f=document.getElementById('f'),bar=document.getElementById('bar');
+const q=document.getElementById('q'),list=document.getElementById('list'),bar=document.getElementById('bar');
 let cities=[],hits=[],sel=-1;
 const norm=s=>s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ł/g,'l');
 fetch('cities.min.json').then(r=>r.json()).then(d=>{cities=d.map(c=>({n:c[0],lat:c[1],lon:c[2],k:norm(c[0])}));fromHash()});
 function url(c){return `https://app.meteo.pl/meteogram/${c.lat},${c.lon}`}
 function show(c){
-  q.value=c.n;list.hidden=true;f.src=url(c);
+  q.value=c.n;list.hidden=true;
   bar.innerHTML=`${c.n} (${c.lat}, ${c.lon}) – <a href="${url(c)}" target="_blank" rel="noopener">otwórz w nowej karcie</a>`;
   location.hash=`${c.lat},${c.lon}`;
+  loadCharts(c);
 }
 function render(){
   list.innerHTML='';
@@ -55,6 +62,83 @@ q.onkeydown=e=>{
 function fromHash(){
   const m=location.hash.match(/^#(-?[\d.]+),(-?[\d.]+)$/);if(!m)return;
   const c=cities.find(x=>x.lat==m[1]&&x.lon==m[2]);if(c)show(c);
+}
+/* Własne wykresy: dane z API aplikacji meteo.pl (model UM 4 km, ~60 h). */
+const API='https://devmgramapi.meteo.pl',chartsEl=document.getElementById('charts');
+let reqId=0;
+async function loadCharts(c){
+  const id=++reqId;chartsEl.innerHTML='<div class="msg">Ładowanie wykresów…</div>';
+  try{
+    const av=await (await fetch(API+'/meteorograms/available')).json();
+    const run=av.um4_60[av.um4_60.length-1];
+    const r=await fetch(API+'/meteorograms/um4_60',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({point:{lat:String(c.lat),lon:String(c.lon)},date:run})});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=(await r.json()).data;if(id!==reqId)return;
+    drawAll(d);
+  }catch(e){if(id===reqId)chartsEl.innerHTML=`<div class="msg">Nie udało się pobrać danych: ${e.message}</div>`}
+}
+const arr=(d,k,f=1)=>d[k].data.map(v=>v*f);
+function drawAll(d){
+  const base=d.airtmp_point,o={t0:+base.first_timestamp,dt:base.interval,n:base.data.length};
+  const gmax=arr(d,'grdtmp_max'),gmin=arr(d,'grdtmp_min'),gmid=gmax.map((v,i)=>(v+gmin[i])/2);
+  chartsEl.innerHTML='';
+  chart({...o,title:'Temperatura',unit:'°C',layers:[
+    {type:'band',lo:arr(d,'airtmp_min'),hi:arr(d,'airtmp_max'),color:'#d9381e'},
+    {type:'band',lo:gmin,hi:gmax,color:'#8a5a2b'},
+    {type:'line',data:gmid,color:'#8a5a2b',label:'grunt (średnia min/max)',dash:'5 3'},
+    {type:'line',data:arr(d,'airtmp_point'),color:'#d9381e',label:'powietrze 2 m',marks:true}]});
+  chart({...o,title:'Opad i wilgotność',unit:'mm/h',unitR:'%',loR:0,hiR:100,lo:0,minHi:1,layers:[
+    {type:'bars',data:arr(d,'pcpttl_aver'),color:'#2b7bd9',label:'opad (mm/h)'},
+    {type:'line',axis:'R',data:arr(d,'realhum_aver'),color:'#2a9d8f',label:'wilgotność względna (%)'}]});
+  chart({...o,title:'Wiatr',unit:'m/s',lo:0,minHi:5,layers:[
+    {type:'line',data:arr(d,'wind_gust_max'),color:'#e08a00',label:'porywy',dash:'5 3'},
+    {type:'line',data:arr(d,'wind10_sd_true_prev_point'),color:'#145097',label:'prędkość wiatru 10 m',marks:true}]});
+  chart({...o,title:'Zachmurzenie i mgła',unit:'%',lo:0,hi:100,layers:[
+    {type:'area',data:arr(d,'cldtot_aver',100),color:'#7a869a',label:'zachmurzenie całkowite'},
+    {type:'line',data:arr(d,'fog_max',100),color:'#8e44ad',label:'mgła (maks.)'}]});
+  const p=base;chartsEl.insertAdjacentHTML('beforeend',`<div class="msg">Model UM 4 km, bieg ${p.fstart}. Czasy w strefie Europe/Warsaw.</div>`);
+}
+const nice=r=>{const m=Math.pow(10,Math.floor(Math.log10(r))),f=r/m;return(f<=1?1:f<=2?2:f<=5?5:10)*m};
+function axis(vals,fLo,fHi,minHi){
+  let lo=fLo??Math.min(...vals)-.5,hi=fHi??Math.max(...vals)+.5;
+  if(minHi!=null)hi=Math.max(hi,minHi);
+  const step=nice((hi-lo)/5||1);
+  if(fLo==null)lo=Math.floor(lo/step)*step;if(fHi==null)hi=Math.ceil(hi/step)*step;
+  return{lo,hi,step};
+}
+function chart(s){
+  const {t0,dt,n,layers}=s,hasR=layers.some(l=>l.axis==='R');
+  const W=900,H=200,L=40,R=hasR?40:10,T=8,B=30,pw=W-L-R,ph=H-T-B;
+  const vals=ax=>layers.filter(l=>(l.axis||'L')===ax).flatMap(l=>l.type==='band'?l.lo.concat(l.hi):l.data);
+  const A=axis(vals('L'),s.lo,s.hi,s.minHi),AR=hasR?axis(vals('R'),s.loR,s.hiR):null;
+  const X=i=>L+pw*i/(n-1),Y=(v,a=A)=>T+ph*(1-(v-a.lo)/(a.hi-a.lo));
+  const fmt=(ts,o)=>new Date(ts*1000).toLocaleString('pl-PL',{timeZone:'Europe/Warsaw',...o});
+  const lab=v=>+v.toFixed(2);
+  let g=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
+  for(let v=A.lo;v<=A.hi+1e-9;v+=A.step){
+    g+=`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="${v===0&&s.unit==='°C'?'#4a90d9':'#ddd'}"/>`+
+       `<text x="${L-5}" y="${Y(v)+4}" text-anchor="end" font-size="11" fill="#555">${lab(v)}</text>`}
+  if(hasR)for(let v=AR.lo;v<=AR.hi+1e-9;v+=AR.step)
+    g+=`<text x="${W-R+5}" y="${Y(v,AR)+4}" font-size="11" fill="#2a9d8f">${lab(v)}</text>`;
+  for(let i=0;i<n;i++){const ts=t0+i*dt,h=+fmt(ts,{hour:'numeric',hour12:false});
+    if(h===0)g+=`<line x1="${X(i)}" x2="${X(i)}" y1="${T}" y2="${T+ph}" stroke="#bbb"/>`+
+      `<text x="${X(i)+(X(i)>W-80?-3:3)}" y="${H-17}" text-anchor="${X(i)>W-80?'end':'start'}" font-size="11" fill="#555">${fmt(ts,{weekday:'short',day:'numeric',month:'numeric'})}</text>`;
+    else if(h%6===0)g+=`<text x="${X(i)}" y="${H-4}" text-anchor="middle" font-size="10" fill="#888">${h}:00</text>`}
+  const bw=pw/(n-1)*.7;
+  for(const l of layers){
+    const ax=l.axis==='R'?AR:A,pt=a=>a.map((v,i)=>`${X(i)},${Y(v,ax)}`);
+    if(l.type==='band')g+=`<polygon points="${pt(l.hi).concat(pt(l.lo).reverse()).join(' ')}" fill="${l.color}" fill-opacity=".15"/>`;
+    else if(l.type==='area')g+=`<polygon points="${[`${X(0)},${Y(ax.lo,ax)}`].concat(pt(l.data),[`${X(n-1)},${Y(ax.lo,ax)}`]).join(' ')}" fill="${l.color}" fill-opacity=".3" stroke="${l.color}" stroke-width="1.5"/>`;
+    else if(l.type==='bars')l.data.forEach((v,i)=>{if(v>0)g+=`<rect x="${X(i)-bw/2}" y="${Y(v,ax)}" width="${bw}" height="${Y(ax.lo,ax)-Y(v,ax)}" fill="${l.color}"/>`});
+    else{g+=`<polyline points="${pt(l.data).join(' ')}" fill="none" stroke="${l.color}" stroke-width="2"${l.dash?` stroke-dasharray="${l.dash}"`:''}/>`;
+      if(l.marks)for(const[i,dy]of[[l.data.indexOf(Math.max(...l.data)),-6],[l.data.indexOf(Math.min(...l.data)),14]])
+        g+=`<text x="${X(i)}" y="${Y(l.data[i],ax)+dy}" text-anchor="middle" font-size="11" font-weight="600" fill="#222">${l.data[i].toFixed(1)}</text>`}
+  }
+  const leg=layers.filter(l=>l.label).map(l=>`<span><i style="background:${l.color}"></i>${l.label}</span>`).join('');
+  const div=document.createElement('div');div.className='chart';
+  div.innerHTML=`<div class="ct">${s.title} [${s.unit}${s.unitR?' / '+s.unitR:''}]${leg}</div>${g}</svg>`;
+  chartsEl.appendChild(div);
 }
 </script>
 </body>
