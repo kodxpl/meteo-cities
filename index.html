@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
 <script>try{var T=localStorage.getItem("theme")}catch(e){}document.documentElement.dataset.theme=T||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light")</script>
 <title>Meteo – prognoza dla miejscowości</title>
 <style>
@@ -13,8 +14,13 @@
   body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
   header{background:linear-gradient(135deg,#0d3a75,#1c6ad1);padding:1rem .8rem 1.1rem;position:sticky;top:0;z-index:10;box-shadow:0 2px 12px #0004}
   .in{max-width:1000px;margin:0 auto;position:relative}
-  #th{position:absolute;right:0;top:-.1rem;width:2.2rem;height:2.2rem;border:0;border-radius:50%;background:#ffffff26;color:#fff;font-size:1.15rem;cursor:pointer;line-height:1}
-  #th:hover{background:#ffffff45}
+  #ctl{position:absolute;right:0;top:-.1rem;display:flex;gap:.5rem}
+  #th,#tp{width:2.2rem;height:2.2rem;border:0;border-radius:50%;background:#ffffff26;color:#fff;font-size:1.15rem;cursor:pointer;line-height:1}
+  #th:hover,#tp:hover{background:#ffffff45}
+  #tp.on{background:#fff;color:#0d3a75}
+  #sz{display:flex;height:2.2rem;border-radius:1.1rem;background:#ffffff26;padding:.2rem;gap:.1rem}
+  #sz button{border:0;border-radius:.9rem;background:none;color:#fff;font:600 .7rem system-ui;min-width:1.7rem;padding:0 .25rem;cursor:pointer;opacity:.75}
+  #sz button.on{background:#fff;color:#0d3a75;opacity:1}
   h1{margin:0 0 .6rem;font-size:1.15rem;font-weight:650;color:#fff;letter-spacing:.2px}
   input{width:100%;padding:.75rem 1rem;font:inherit;font-size:1.05rem;border:0;border-radius:12px;background:#fff;color:#17212f;outline:0;box-shadow:0 2px 8px #0003}
   input:focus{box-shadow:0 0 0 3px #ffffff80,0 2px 8px #0003}
@@ -34,16 +40,17 @@
   .ct small{font-weight:400;margin:0}
   .ct span{font-weight:400;color:var(--mut);font-size:.85rem;white-space:nowrap}
   .ct i{display:inline-block;width:.8em;height:.5em;margin-right:.35em;border-radius:3px;vertical-align:.05em}
-  svg{display:block;touch-action:pan-y;overflow:visible}
+  svg{display:block;overflow:visible}
+  .tipon svg{touch-action:pan-y}
   .t{fill:var(--axis);font-size:11px}
   .gl{stroke:var(--grid)}
   .dv{stroke:var(--line)}
   .now{stroke:var(--acc);stroke-dasharray:3 3}
   .cur{stroke:var(--fg);stroke-opacity:.35}
-  .mk{fill:var(--fg);font-size:11px;font-weight:650;paint-order:stroke;stroke:var(--card);stroke-width:3px}
   .tip{position:absolute;pointer-events:none;background:var(--card);color:var(--fg);border-radius:8px;padding:.4rem .6rem;font-size:.8rem;box-shadow:0 4px 18px #0004,0 0 0 1px var(--line);white-space:nowrap;z-index:3}
   .tip b{display:block;margin-bottom:.15rem}
   .tip i{display:inline-block;width:.7em;height:.7em;border-radius:50%;margin-right:.4em}
+  .mk{fill:var(--fg);font-size:11px;font-weight:650;paint-order:stroke;stroke:var(--card);stroke-width:3px}
   .msg{padding:1.2rem .4rem;color:var(--mut);text-align:center}
   .foot{color:var(--mut);font-size:.8rem;text-align:center;padding:.4rem 0 1rem}
 </style>
@@ -51,7 +58,11 @@
 <body>
 <header><div class="in">
   <h1>Meteo · prognoza godzinowa</h1>
+<div id="ctl">
+  <div id="sz" title="Wysokość wykresów"><button data-s="XXS">XXS</button><button data-s="XS">XS</button><button data-s="S">S</button><button data-s="M">M</button><button data-s="L">L</button></div>
+  <button id="tp" title="Podpowiedzi po najechaniu na wykres" aria-label="Podpowiedzi"><b>i</b></button>
   <button id="th" title="Zmień motyw (jasny/ciemny)" aria-label="Zmień motyw"></button>
+  </div>
   <input id="q" placeholder="Wpisz nazwę miejscowości…" autocomplete="off" autofocus>
   <div id="list" hidden></div>
 </div></header>
@@ -64,13 +75,20 @@ const $=id=>document.getElementById(id),q=$('q'),list=$('list'),bar=$('bar'),cha
 const th=$('th'),root=document.documentElement;
 const setIcon=()=>{th.textContent=root.dataset.theme==='dark'?'☀':'☾'};setIcon();
 th.onclick=()=>{const n=root.dataset.theme==='dark'?'light':'dark';root.dataset.theme=n;try{localStorage.setItem('theme',n)}catch(e){}setIcon()};
+const HS={XXS:70,XS:100,S:130,M:190,L:290};let SZ='M';
+try{const s=localStorage.getItem('sz');if(HS[s])SZ=s}catch(e){}
+const setSz=()=>document.querySelectorAll('#sz button').forEach(b=>b.classList.toggle('on',b.dataset.s===SZ));setSz();
+$('sz').onclick=e=>{const s=e.target.dataset.s;if(!s||s===SZ)return;SZ=s;try{localStorage.setItem('sz',s)}catch(e){}setSz();if(last)drawAll(last)};
+let TIP=false;try{TIP=localStorage.getItem('tip')==='1'}catch(e){}
+const tp=$('tp'),setTip=()=>{tp.classList.toggle('on',TIP);chartsEl.classList.toggle('tipon',TIP)};setTip();
+tp.onclick=()=>{TIP=!TIP;try{localStorage.setItem('tip',TIP?'1':'0')}catch(e){}setTip()};
 let cities=[],hits=[],sel=-1;
 const norm=s=>s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ł/g,'l');
 fetch('cities.min.json').then(r=>r.json()).then(d=>{cities=d.map(c=>({n:c[0],lat:c[1],lon:c[2],k:norm(c[0])}));fromHash()});
 const url=c=>`https://app.meteo.pl/meteogram/${c.lat},${c.lon}`;
 function show(c){
   q.value=c.n;list.hidden=true;q.blur();
-  bar.innerHTML=`<b>${c.n}</b><span>${c.lat}, ${c.lon}</span><a href="${url(c)}" target="_blank" rel="noopener">oryginalny meteogram ↗</a>`;
+  bar.innerHTML=`<b>${c.n}</b><span>${c.lat}, ${c.lon}</span><a href="${url(c)}" target="_blank" rel="noopener noreferrer nofollow" referrerpolicy="no-referrer">oryginalny meteogram ↗</a>`;
   document.title=`${c.n} – Meteo`;location.hash=`${c.lat},${c.lon}`;
   loadCharts(c);
 }
@@ -141,10 +159,10 @@ function drawAll(d){
   chartsEl.insertAdjacentHTML('beforeend',`<div class="foot">Model UM 4 km, bieg ${base.fstart} · czas: Europe/Warsaw</div>`);
 }
 const nice=r=>{const m=Math.pow(10,Math.floor(Math.log10(r))),f=r/m;return(f<=1?1:f<=2?2:f<=5?5:10)*m};
-function axis(vals,fLo,fHi,minHi){
+function axis(vals,fLo,fHi,minHi,k=5){
   let lo=fLo??Math.min(...vals)-.5,hi=fHi??Math.max(...vals)+.5;
   if(minHi!=null)hi=Math.max(hi,minHi);
-  const step=nice((hi-lo)/5||1);
+  const step=nice((hi-lo)/k||1);
   if(fLo==null)lo=Math.floor(lo/step)*step;if(fHi==null)hi=Math.ceil(hi/step)*step;
   return{lo,hi,step};
 }
@@ -153,9 +171,9 @@ const TZ='Europe/Warsaw',dtf=o=>new Intl.DateTimeFormat('pl-PL',{timeZone:TZ,...
 function chart(s){
   const {t0,dt,n,layers}=s,hasR=layers.some(l=>l.axis==='R');
   const div=document.createElement('div');div.className='chart';chartsEl.appendChild(div);
-  const W=Math.max(280,div.clientWidth-28),H=190,L=34,R=hasR?34:8,T=8,B=30,pw=W-L-R,ph=H-T-B,narrow=W<520;
+  const W=Math.max(280,div.clientWidth-28),H=HS[SZ],L=34,R=hasR?34:8,T=8,B=30,pw=W-L-R,ph=H-T-B,narrow=W<520;
   const vals=ax=>layers.filter(l=>(l.axis||'L')===ax).flatMap(l=>l.type==='band'?l.lo.concat(l.hi):l.data);
-  const A=axis(vals('L'),s.lo,s.hi,s.minHi),AR=hasR?axis(vals('R'),s.loR,s.hiR):null;
+  const k=Math.max(2,Math.min(5,Math.floor(ph/30))),A=axis(vals('L'),s.lo,s.hi,s.minHi,k),AR=hasR?axis(vals('R'),s.loR,s.hiR,null,k):null;
   const X=i=>L+pw*i/(n-1),Y=(v,a=A)=>T+ph*(1-(v-a.lo)/(a.hi-a.lo)),lab=v=>+v.toFixed(2);
   let g='';
   for(let v=A.lo;v<=A.hi+1e-9;v+=A.step)
@@ -181,11 +199,12 @@ function chart(s){
   div.innerHTML=`<div class="ct">${s.title}<small>${s.unit}${s.unitR?' · '+s.unitR:''}</small>${leg}</div><svg width="${W}" height="${H}">${g}<line class="cur" y1="${T}" y2="${T+ph}" style="display:none"/></svg><div class="tip" hidden></div>`;
   const svg=div.querySelector('svg'),cur=svg.lastChild,tip=div.querySelector('.tip'),top=div.querySelector('.ct').offsetHeight+14;
   svg.onpointermove=e=>{
+    if(!TIP)return;
     const i=Math.max(0,Math.min(n-1,Math.round((e.clientX-svg.getBoundingClientRect().left-L)/pw*(n-1))));
     cur.setAttribute('x1',X(i));cur.setAttribute('x2',X(i));cur.style.display='';
     tip.innerHTML=`<b>${fT.format(new Date((t0+i*dt)*1000))}</b>`+layers.filter(l=>l.label).map(l=>`<i style="background:${l.color}"></i>${l.label}: ${l.data[i].toFixed(1)} ${l.u}<br>`).join('');
-    tip.hidden=false;const w=tip.offsetWidth,x=X(i)+14+14;
-    tip.style.left=(x+w>div.clientWidth-4?X(i)+14-w-10:x)+'px';tip.style.top=top+'px';
+    tip.hidden=false;const w=tip.offsetWidth,x=X(i)+28;
+    tip.style.left=(x+w>div.clientWidth-4?X(i)+4-w:x)+'px';tip.style.top=top+'px';
   };
   svg.onpointerleave=()=>{cur.style.display='none';tip.hidden=true};
 }
